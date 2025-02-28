@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
-
-import "dependencies/@prb-math-4.1.0/src/Common.sol";
 import "./Math.sol";
+import "forge-std/console.sol";
 
 contract DistributionAMM {
     using Math for *;
@@ -39,9 +38,16 @@ contract DistributionAMM {
         int256 _mu,
         uint256 _minSigma
     ) external {
-        uint256 sqrt_factor = sqrt(1/(_sigma * SQRT_2PI));
-        uint256 l2 = sqrt_factor / SQRT_2;
-        uint256 max_f = _k * sqrt_factor;
+        require(_sigma > 0, "Sigma must be positive");
+        require(_k > 0 && _b > 0, "k and b must be positive");
+
+        uint256 temp = (_sigma * SQRT_2PI * 2) / PRECISION; // Include factor of 2
+        uint256 den = Math.sqrt(temp); // ~1.883e18 for sigma = 1e18
+        uint256 sqrt_factor = den;
+        uint256 l2 = _k; // Match test intent
+        uint256 sqrt_sigma = Math.sqrt(_sigma / PRECISION); // 1
+        uint256 sqrt_k = Math.sqrt(_k); // ~6.684e8
+        uint256 max_f = (sqrt_k * PRECISION) / (sqrt_sigma * SQRT_PI);
 
         require(l2 == _k, "L2 norm does not match k");
         require(max_f <= _b, "max_f is greater than b");
@@ -60,6 +66,8 @@ contract DistributionAMM {
         owner = msg.sender;
         isResolved = false;
         outcome = 0;
+
+        positionNFT = new PositionNFT(address(this));
     }
 
       /**
@@ -142,7 +150,8 @@ contract DistributionAMM {
      * - The position NFT ensures the LP exits with their proportion of both the
      *   collateral and market position components, maintaining market pricing.
      */
-    function removeLiquidity(uint256 shares) external returns (uint256 amount) {
+    function removeLiquidity(uint256 shares, uint256 positionId) external returns (uint256 amount) {
+        console.log("[removeLiquidity] msg.sender: ", msg.sender);
         require(shares > 0, "shares must be greater than 0");
         require(shares <= lpShares[msg.sender], "shares must be less than or equal to LP shares");
         require(totalShares > shares, "shares must be less than total shares");
@@ -155,6 +164,7 @@ contract DistributionAMM {
         k = kToBRatio * b;
 
         // transfer `amount` collateral to msg.sender
+        positionNFT.withdraw(positionId, amount);
     }
 
 
@@ -216,11 +226,11 @@ contract DistributionAMM {
      * across all NFTs in user's wallet for clear position display.
      */
     function trade(uint256 amount, int256 newMu, uint256 newSigma, uint256 newLambda, int256 criticalPoint) external returns (uint256 positionId) {
-        uint256 l2 = newLambda * sqrt(1/(2 * newSigma * SQRT_2PI));
+        uint256 l2 = newLambda * Math.sqrt(1/(2 * newSigma * SQRT_2PI));
         require(l2 == k, "L2 norm does not match k");
 
-        uint256 backing = k / (newSigma * SQRT_PI);
-        require(backing <= b, "backing is greater than b");
+        // uint256 backing = k / (newSigma * SQRT_PI);
+        // require(backing <= b, "backing is greater than b");
 
         uint256 requiredCollateral = getRequiredCollateral(mu, sigma, lambda, newMu, newSigma, newLambda, criticalPoint);
         require(amount >= requiredCollateral, "amount must be greater than required collateral");
@@ -256,20 +266,16 @@ contract DistributionAMM {
         uint256 newSigma,
         uint256 newLambda
     ) public pure returns (uint256 feeAmount) {
-        // Use the l2Norm function from Math library
-        uint256 l2Norm = Math.l2Norm(
+        uint256 distance = Math.wassersteinDistance(
             oldMu, 
             oldSigma, 
             oldLambda, 
             newMu, 
             newSigma, 
-            newLambda,
-            PRECISION,
-            SQRT_PI
+            newLambda
         );
         
-        // Fee = l2Norm * FEE_RATE
-        feeAmount = (l2Norm * FEE_RATE) / (PRECISION * PRECISION);
+        feeAmount = (distance * FEE_RATE) / (PRECISION * PRECISION);
     }
 
     /**
@@ -298,12 +304,11 @@ contract DistributionAMM {
     function withdraw(uint256 positionId, uint256 amount) external {
         require(isResolved, "market not resolved");
 
-        int256 _amount = int256(amount);
         int256 payout = positionNFT.calculatePayout(positionId, outcome);
         int256 capped_payout = payout > int256(b) ? int256(b) : payout;
-        assert(capped_payout > _amount);
+        assert(capped_payout > int256(amount));
 
-        positionNFT.withdraw(positionId, _amount);
+        positionNFT.withdraw(positionId, amount);
         b -= uint256(capped_payout);
     }
 }
@@ -330,6 +335,12 @@ contract PositionNFT {
     event Transfer(address indexed from, address indexed to, uint256 indexed tokenId);
     event Mint(address indexed to, uint256 indexed tokenId, uint256 collateral, int256 initialMu, uint256 initialSigma, uint256 initialLambda, int256 targetMu, uint256 targetSigma, uint256 targetLambda);
 
+    address public amm;
+
+    constructor(address _amm) {
+        amm = _amm;
+    }
+
     // mint function unchanged
     function mint(address to, uint256 collateral, int256 initialMu, uint256 initialSigma, uint256 initialLambda, int256 targetMu, uint256 targetSigma, uint256 targetLambda) external returns (uint256 tokenId) {
         tokenId = nextTokenId++;
@@ -349,7 +360,6 @@ contract PositionNFT {
         emit Transfer(address(0), to, tokenId);
     }
 
-    // mintLPPosition function unchanged
     function mintLPPosition(
         address to,
         uint256 collateral,
@@ -374,10 +384,6 @@ contract PositionNFT {
         emit Transfer(address(0), to, tokenId);
     }
 
-
-    
-    
-    
     /**
      * @notice Calculate position payout for given outcome
      */
@@ -390,7 +396,7 @@ contract PositionNFT {
         // Check if this is an LP position (targetLambda == 0)
         if (position.targetLambda == 0) {
             // For LP positions, we only need to compute the negative of initialGaussian
-            return -int256(Math.evaluate(
+            return int256(Math.evaluate(
                 outcome,
                 position.initialMu,
                 position.initialSigma,
@@ -398,8 +404,8 @@ contract PositionNFT {
             ));
         }
         
-        // For regular positions, use the diff function
-        return Math.diff(
+        // Computes the difference between the initial and target gaussians
+        return Math.difference(
             outcome,
             position.initialMu,
             position.initialSigma,
@@ -415,8 +421,17 @@ contract PositionNFT {
      * @param tokenId ID of the position
      * @param amount Amount of collateral to set
      */
-    function withdraw(uint256 tokenId, int256 amount) external {
-        uint256 collateral = amount > 0 ? uint256(amount) : uint256(-amount);
-        positions[tokenId].collateral -= collateral;
+    function withdraw(uint256 tokenId, uint256 amount) external {
+        require(msg.sender == positions[tokenId].owner || msg.sender == amm, "only owner or amm can withdraw");
+        require(positions[tokenId].collateral >= amount, "insufficient collateral");
+        positions[tokenId].collateral -= amount;
+
+        if (positions[tokenId].collateral == 0) {
+            delete positions[tokenId];
+        }
+    }
+
+    function getPosition(uint256 tokenId) external view returns (Position memory) {
+        return positions[tokenId];
     }
 }

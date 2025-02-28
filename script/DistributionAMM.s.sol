@@ -2,7 +2,7 @@
 pragma solidity ^0.8.13;
 
 import {Script, console} from "forge-std/Script.sol";
-import {DistributionAMM} from "../src/Counter.sol";
+import {DistributionAMM} from "../src/DistributionAMM.sol";
 
 contract DistributionAMMScript is Script {
     DistributionAMM public distributionAMM;

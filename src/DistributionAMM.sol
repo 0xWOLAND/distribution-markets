@@ -2,6 +2,7 @@
 pragma solidity ^0.8.13;
 
 import "dependencies/@prb-math-4.1.0/src/Common.sol";
+import "dependencies/@openzeppelin-contracts-5.2.0/utils/math/Math.sol";
 
 contract DistributionAMM {
     uint256 public k;
@@ -23,6 +24,10 @@ contract DistributionAMM {
 
     PositionNFT public positionNFT;
 
+    address public owner;
+    bool public isResolved;
+    int256 public outcome;
+
     function initialize(
         uint256 _k,
         uint256 _b,
@@ -30,7 +35,7 @@ contract DistributionAMM {
         uint256 _sigma,
         uint256 _lambda,
         int256 _mu,
-        uint256 _minSigma,
+        uint256 _minSigma
     ) external {
 
         uint256 sqrt_factor = sqrt(1/(_sigma * SQRT_2PI));
@@ -50,6 +55,10 @@ contract DistributionAMM {
 
         lpShares[msg.sender] = 1e18;
         totalShares = 1e18;
+
+        owner = msg.sender;
+        isResolved = false;
+        outcome = 0;
     }
 
       /**
@@ -119,14 +128,14 @@ contract DistributionAMM {
             shares = y * totalShares;
         }
 
-        k = _k;
         b = _b;
+        k = _k;
 
         // sender gets p shares of the new pool
         lpShares[msg.sender] += shares;
         totalShares += shares;
 
-        positionNFT.mintLPPosition(msg.sender, amount, mu, sigma, lambda);
+        positionNFT.mintLPPosition(msg.sender, amount, mu, sigma, y * lambda);
     }
 
     /**
@@ -175,15 +184,15 @@ contract DistributionAMM {
     function getRequiredCollateral(
         int256 oldMu,
         uint256 oldSigma,
-        uint256 oldLam,
+        uint256 oldLambda,
         int256 newMu,
         uint256 newSigma,
-        uint256 newLam,
-        int256 crit
-    ) external pure returns (uint256 amount) {
+        uint256 newLambda,
+        int256 criticalPoint
+    ) public pure returns (uint256 amount) {
         // Distance squared: (x - μ)^2
-        uint256 dOld2 = uint256((crit - oldMu) * (crit - oldMu));
-        uint256 dNew2 = uint256((crit - newMu) * (crit - newMu));
+        uint256 dOld2 = uint256((criticalPoint - oldMu) * (criticalPoint - oldMu));
+        uint256 dNew2 = uint256((criticalPoint - newMu) * (criticalPoint - newMu));
 
         // Compute σ^2 once, use for denom and norm
         uint256 sOld2 = oldSigma * oldSigma / PRECISION;
@@ -198,8 +207,8 @@ contract DistributionAMM {
         uint256 eNew = expNew < PRECISION ? PRECISION - expNew : 0;
 
         // Combined coefficient: λ / (σ * sqrt(2π))
-        uint256 cOld = oldLam * PRECISION / (oldSigma * SQRT_2PI);
-        uint256 cNew = newLam * PRECISION / (newSigma * SQRT_2PI);
+        uint256 cOld = oldLambda * PRECISION / (oldSigma * SQRT_2PI);
+        uint256 cNew = newLambda * PRECISION / (newSigma * SQRT_2PI);
 
         // f(x) and g(x) in one step
         uint256 f = cOld * eOld / PRECISION;
@@ -230,23 +239,23 @@ contract DistributionAMM {
      * which occurs at the critical point. Frontend should aggregate positions
      * across all NFTs in user's wallet for clear position display.
      */
-    function trade(uint256 amount, int256 _mu, uint256 _sigma, uint256 _lambda, int256 criticalPoint) external returns (uint256 positionId) {
-        uint256 l2 = _lambda * sqrt(1/(2 * _sigma * SQRT_2PI));
+    function trade(uint256 amount, int256 newMu, uint256 newSigma, uint256 newLambda, int256 criticalPoint) external returns (uint256 positionId) {
+        uint256 l2 = newLambda * sqrt(1/(2 * newSigma * SQRT_2PI));
         require(l2 == k, "L2 norm does not match k");
 
-        uint256 backing = k / (_sigma * SQRT_PI);
+        uint256 backing = k / (newSigma * SQRT_PI);
         require(backing <= b, "backing is greater than b");
 
-        uint256 requiredCollateral = getRequiredCollateral(mu, sigma, lambda, _mu, _sigma, _lambda, criticalPoint);
+        uint256 requiredCollateral = getRequiredCollateral(mu, sigma, lambda, newMu, newSigma, newLambda, criticalPoint);
         require(amount >= requiredCollateral, "amount must be greater than required collateral");
 
-        uint256 fee = calculateFee(mu, sigma, lambda, _mu, _sigma, _lambda);
+        uint256 fee = calculateFee(mu, sigma, lambda, newMu, newSigma, newLambda);
         amount -= fee;
 
         b += amount;
         k = kToBRatio * b;
 
-        positionNFT.mint(msg.sender, amount, mu, sigma, lambda, _mu, _sigma, _lambda);
+        positionNFT.mint(msg.sender, amount, mu, sigma, lambda, newMu, newSigma, newLambda);
     }
 
        /**
@@ -269,8 +278,8 @@ contract DistributionAMM {
         uint256 oldLambda,
         int256 newMu,
         uint256 newSigma,
-        uint256 newLambda,
-    ) external view returns (uint256 feeAmount) {
+        uint256 newLambda
+    ) public view returns (uint256 feeAmount) {
         uint256 term1 = (oldLambda * oldLambda * PRECISION) / (2 * oldSigma * SQRT_PI);
         uint256 term2 = (newLambda * newLambda * PRECISION) / (2 * newSigma * SQRT_PI);
 
@@ -279,7 +288,7 @@ contract DistributionAMM {
         uint256 deltaMuSquared = uint256(deltaMu * deltaMu);
         uint256 varianceSum = (oldSigma * oldSigma) + (newSigma * newSigma);
         uint256 expArg = (deltaMuSquared * PRECISION) / (2 * varianceSum);
-        uint256 expResult = exp(expArg); // Assuming exp returns 1e18 scaled result
+        uint256 expResult = exp2(expArg); // Assuming exp returns 1e18 scaled result
 
         uint256 sqrtVarianceSum = sqrt(varianceSum * PRECISION); // Scale up for precision
         uint256 crossTermNumerator = (2 * oldLambda * newLambda * expResult * PRECISION) / SQRT_PI;
@@ -296,6 +305,20 @@ contract DistributionAMM {
     }
 
     /**
+     * @notice Resolve market with final outcome
+     * @param _outcome Final value of measured variable
+     *
+     * Should have timelocked dispute period
+     */
+    function resolve(int256 _outcome) external {
+        require(msg.sender == owner, "only owner can resolve");
+        require(!isResolved, "market already resolved");
+
+        isResolved = true;
+        outcome = _outcome;
+    }
+
+    /**
      * @notice Withdraw winnings from position
      * @param positionId NFT token ID
      * @param amount Amount to withdraw
@@ -305,10 +328,14 @@ contract DistributionAMM {
      * evaluated at outcome point. Tracks partial withdrawals.
      */
     function withdraw(uint256 positionId, uint256 amount) external {
-        Position position = positionNFT.positions(positionId);
-        require(position.owner == msg.sender, "only owner can withdraw");
+        require(isResolved, "market not resolved");
 
-        uint256 payout = amount * (PRECISION * PRECISION) / (position.collateral * FEE_RATE);
+        // require(position.owner == msg.sender, "only owner can withdraw");
+        int256 payout = positionNFT.calculatePayout(positionId, outcome);
+        int256 capped_payout = payout > int256(b) ? int256(b) : payout;
+
+        positionNFT.withdraw(positionId, capped_payout);
+        b -= uint256(capped_payout);
     }
 }
 
@@ -319,7 +346,7 @@ contract PositionNFT {
         int256 initialMu;
         uint256 initialSigma;
         uint256 initialLambda;
-        uint256 targetMu;
+        int256 targetMu;
         uint256 targetSigma;
         uint256 targetLambda;
     }
@@ -330,9 +357,9 @@ contract PositionNFT {
     mapping(uint256 => address) private _owners;
 
     event Transfer(address indexed from, address indexed to, uint256 indexed tokenId);
-    event Mint(address indexed to, uint256 indexed tokenId, uint256 collateral, int256 initialMu, uint256 initialSigma, uint256 initialLambda, uint256 targetMu, uint256 targetSigma, uint256 targetLambda);
+    event Mint(address indexed to, uint256 indexed tokenId, uint256 collateral, int256 initialMu, uint256 initialSigma, uint256 initialLambda, int256 targetMu, uint256 targetSigma, uint256 targetLambda);
 
-    function mint(address to, uint256 collateral, int256 initialMu, uint256 initialSigma, uint256 initialLambda, uint256 targetMu, uint256 targetSigma, uint256 targetLambda) external returns (uint256 tokenId) {
+    function mint(address to, uint256 collateral, int256 initialMu, uint256 initialSigma, uint256 initialLambda, int256 targetMu, uint256 targetSigma, uint256 targetLambda) external returns (uint256 tokenId) {
         tokenId = nextTokenId++;
         positions[tokenId] = Position({
             owner: to,
@@ -346,7 +373,7 @@ contract PositionNFT {
         });
         _owners[tokenId] = to;
 
-        emit Mint(to, tokenId, collateral);
+        emit Mint(to, tokenId, collateral, initialMu, initialSigma, initialLambda, targetMu, targetSigma, targetLambda);
         emit Transfer(address(0), to, tokenId);
     }
 
@@ -386,4 +413,50 @@ contract PositionNFT {
         emit Transfer(address(0), to, tokenId);
     }
 
+    
+    /**
+     * @notice Calculate position payout for given outcome
+     * @return amount Payout amount
+     * 
+     * Uses stored parameters to compute:
+     */
+    function calculatePayout(
+        uint256 tokenId, 
+        int256 outcome
+    ) external view returns (int256 amount) {
+        Position storage position = positions[tokenId];
+        uint256 initialGaussian = calculateGaussian(outcome, position.initialMu, position.initialSigma, position.initialLambda);
+        uint256 targetGaussian = calculateGaussian(outcome, position.targetMu, position.targetSigma, position.targetLambda);
+        amount = int256(initialGaussian) - int256(targetGaussian);
+    }
+
+    /**
+     * @notice Calculate the value of a gaussian at a given point
+     * @param x The point to evaluate the gaussian at
+     * @param mu The mean of the gaussian
+     * @param sigma The standard deviation of the gaussian
+     * @param lambda The scale factor of the gaussian
+     * @return gaussian The value of the gaussian at the given point
+     */
+    function calculateGaussian(int256 x, int256 mu, uint256 sigma, uint256 lambda) private view returns (uint256 gaussian) {
+        if (sigma == 0) {
+            return 0;
+        }
+    
+        uint256 deltaSquared = uint256(x - mu) * uint256(x - mu);
+        uint256 denominator = 2 * sigma * sigma;
+        uint256 exponent = deltaSquared / denominator;
+        
+        gaussian = lambda * exp2(exponent);
+    }
+
+    /**
+     * @notice Set collateral for a position
+     * @param tokenId ID of the position
+     * @param amount Amount of collateral to set
+     */
+    function withdraw(uint256 tokenId, int256 amount) external {
+        uint256 collateral = amount > 0 ? uint256(amount) : uint256(-amount);
+        positions[tokenId].collateral -= collateral;
+    }
 }

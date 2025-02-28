@@ -67,7 +67,7 @@ contract DistributionAMM {
         isResolved = false;
         outcome = 0;
 
-        positionNFT = new PositionNFT();
+        positionNFT = new PositionNFT(address(this));
     }
 
       /**
@@ -150,7 +150,8 @@ contract DistributionAMM {
      * - The position NFT ensures the LP exits with their proportion of both the
      *   collateral and market position components, maintaining market pricing.
      */
-    function removeLiquidity(uint256 shares) external returns (uint256 amount) {
+    function removeLiquidity(uint256 shares, uint256 positionId) external returns (uint256 amount) {
+        console.log("[removeLiquidity] msg.sender: ", msg.sender);
         require(shares > 0, "shares must be greater than 0");
         require(shares <= lpShares[msg.sender], "shares must be less than or equal to LP shares");
         require(totalShares > shares, "shares must be less than total shares");
@@ -163,6 +164,7 @@ contract DistributionAMM {
         k = kToBRatio * b;
 
         // transfer `amount` collateral to msg.sender
+        positionNFT.withdraw(positionId, amount);
     }
 
 
@@ -302,12 +304,11 @@ contract DistributionAMM {
     function withdraw(uint256 positionId, uint256 amount) external {
         require(isResolved, "market not resolved");
 
-        int256 _amount = int256(amount);
         int256 payout = positionNFT.calculatePayout(positionId, outcome);
         int256 capped_payout = payout > int256(b) ? int256(b) : payout;
-        assert(capped_payout > _amount);
+        assert(capped_payout > int256(amount));
 
-        positionNFT.withdraw(positionId, _amount);
+        positionNFT.withdraw(positionId, amount);
         b -= uint256(capped_payout);
     }
 }
@@ -333,6 +334,12 @@ contract PositionNFT {
 
     event Transfer(address indexed from, address indexed to, uint256 indexed tokenId);
     event Mint(address indexed to, uint256 indexed tokenId, uint256 collateral, int256 initialMu, uint256 initialSigma, uint256 initialLambda, int256 targetMu, uint256 targetSigma, uint256 targetLambda);
+
+    address public amm;
+
+    constructor(address _amm) {
+        amm = _amm;
+    }
 
     // mint function unchanged
     function mint(address to, uint256 collateral, int256 initialMu, uint256 initialSigma, uint256 initialLambda, int256 targetMu, uint256 targetSigma, uint256 targetLambda) external returns (uint256 tokenId) {
@@ -389,7 +396,7 @@ contract PositionNFT {
         // Check if this is an LP position (targetLambda == 0)
         if (position.targetLambda == 0) {
             // For LP positions, we only need to compute the negative of initialGaussian
-            return -int256(Math.evaluate(
+            return int256(Math.evaluate(
                 outcome,
                 position.initialMu,
                 position.initialSigma,
@@ -397,7 +404,7 @@ contract PositionNFT {
             ));
         }
         
-        // For regular positions, use the diff function
+        // Computes the difference between the initial and target gaussians
         return Math.difference(
             outcome,
             position.initialMu,
@@ -414,9 +421,17 @@ contract PositionNFT {
      * @param tokenId ID of the position
      * @param amount Amount of collateral to set
      */
-    function withdraw(uint256 tokenId, int256 amount) external {
-        uint256 collateral = amount > 0 ? uint256(amount) : uint256(-amount);
-        require(positions[tokenId].collateral >= collateral, "insufficient collateral");
-        positions[tokenId].collateral -= collateral;
+    function withdraw(uint256 tokenId, uint256 amount) external {
+        require(msg.sender == positions[tokenId].owner || msg.sender == amm, "only owner or amm can withdraw");
+        require(positions[tokenId].collateral >= amount, "insufficient collateral");
+        positions[tokenId].collateral -= amount;
+
+        if (positions[tokenId].collateral == 0) {
+            delete positions[tokenId];
+        }
+    }
+
+    function getPosition(uint256 tokenId) external view returns (Position memory) {
+        return positions[tokenId];
     }
 }

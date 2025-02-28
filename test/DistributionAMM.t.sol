@@ -2,7 +2,7 @@
 pragma solidity ^0.8.13;
 
 import {Test, console} from "forge-std/Test.sol";
-import {DistributionAMM} from "../src/DistributionAMM.sol";
+import {DistributionAMM, PositionNFT} from "../src/DistributionAMM.sol";
 
 contract DistributionAMMTest is Test {
     // Constants from DistributionAMM
@@ -15,7 +15,6 @@ contract DistributionAMMTest is Test {
     address public user1 = address(0x2);
 
     DistributionAMM public amm;
-
     function setUp() public {
         vm.startPrank(owner);
         amm = new DistributionAMM();
@@ -31,11 +30,36 @@ contract DistributionAMMTest is Test {
         vm.stopPrank();
     }
 
+    function printPosition(uint256 positionId) public {
+        PositionNFT positionNFT = PositionNFT(address(amm.positionNFT()));
+        PositionNFT.Position memory position = positionNFT.getPosition(positionId);
+        console.log("[POSITION NFT] positionId: ", positionId);
+        console.log("position.owner: ", position.owner);
+        console.log("position.collateral: ", position.collateral);
+        console.log("position.initialMu: ", position.initialMu);
+        console.log("position.initialSigma: ", position.initialSigma);
+        console.log("position.initialLambda: ", position.initialLambda);
+        console.log("position.targetMu: ", position.targetMu);
+        console.log("position.targetSigma: ", position.targetSigma);
+        console.log("position.targetLambda: ", position.targetLambda);
+    }
+
 
     function test_AddLiquidity() public {
         vm.startPrank(user1);
         uint256 amount = 2e18;
         (uint256 shares, uint256 positionId) = amm.addLiquidity(amount);
+        console.log("shares: ", shares);
+        console.log("positionId: ", positionId);
+        console.log("lpShares[user1]: ", amm.lpShares(user1));
+        PositionNFT positionNFT = PositionNFT(address(amm.positionNFT()));
+        printPosition(positionId);
+        
+        console.log("--------------------------------");
+
+        uint256 removedAmount = amm.removeLiquidity(shares, positionId);
+        console.log("removedAmount: ", removedAmount);
+        printPosition(positionId);
         vm.stopPrank();
     }
 }

@@ -2,9 +2,11 @@
 pragma solidity ^0.8.13;
 
 import "dependencies/@prb-math-4.1.0/src/Common.sol";
-import "dependencies/@openzeppelin-contracts-5.2.0/utils/math/Math.sol";
+import "./Math.sol";
 
 contract DistributionAMM {
+    using Math for *;
+
     uint256 public k;
     uint256 public b;
     uint256 public kToBRatio;
@@ -37,7 +39,6 @@ contract DistributionAMM {
         int256 _mu,
         uint256 _minSigma
     ) external {
-
         uint256 sqrt_factor = sqrt(1/(_sigma * SQRT_2PI));
         uint256 l2 = sqrt_factor / SQRT_2;
         uint256 max_f = _k * sqrt_factor;
@@ -115,13 +116,6 @@ contract DistributionAMM {
         uint256 _b = b * (1 + y);
         uint256 _k = kToBRatio * _b;
         
-        // p = y / (1 + y)
-        // shares = (p * totalShares) / (1 - p)
-        // ==> shares = ((y / (1 + y)) * totalShares) / (1 - (y / (1 + y)))
-        // ==> shares = (y * totalShares) / ((1 + y) - y)
-        // ==> shares = (y * totalShares) / (1)
-        // ==> shares = y * totalShares
-
         if (totalShares == 0) {
             shares = amount;
         } else {
@@ -131,11 +125,10 @@ contract DistributionAMM {
         b = _b;
         k = _k;
 
-        // sender gets p shares of the new pool
         lpShares[msg.sender] += shares;
         totalShares += shares;
 
-        positionNFT.mintLPPosition(msg.sender, amount, mu, sigma, y * lambda);
+        positionId = positionNFT.mintLPPosition(msg.sender, amount, mu, sigma, y * lambda);
     }
 
     /**
@@ -190,30 +183,13 @@ contract DistributionAMM {
         uint256 newLambda,
         int256 criticalPoint
     ) public pure returns (uint256 amount) {
-        // Distance squared: (x - μ)^2
-        uint256 dOld2 = uint256((criticalPoint - oldMu) * (criticalPoint - oldMu));
-        uint256 dNew2 = uint256((criticalPoint - newMu) * (criticalPoint - newMu));
-
-        // Compute σ^2 once, use for denom and norm
-        uint256 sOld2 = oldSigma * oldSigma / PRECISION;
-        uint256 sNew2 = newSigma * newSigma / PRECISION;
-
-        // Exponent: -((x - μ)^2 / (2 * σ^2)), unscaled
-        uint256 expOld = dOld2 / (2 * sOld2);
-        uint256 expNew = dNew2 / (2 * sNew2);
-
-        // Approximate exp(-x) as 1 - x, cap at 0, scaled later
-        uint256 eOld = expOld < PRECISION ? PRECISION - expOld : 0;
-        uint256 eNew = expNew < PRECISION ? PRECISION - expNew : 0;
-
-        // Combined coefficient: λ / (σ * sqrt(2π))
-        uint256 cOld = oldLambda * PRECISION / (oldSigma * SQRT_2PI);
-        uint256 cNew = newLambda * PRECISION / (newSigma * SQRT_2PI);
-
-        // f(x) and g(x) in one step
-        uint256 f = cOld * eOld / PRECISION;
-        uint256 g = cNew * eNew / PRECISION;
-
+        // Calculate old Gaussian at critical point
+        uint256 f = Math.evaluate(criticalPoint, oldMu, oldSigma, oldLambda);
+        
+        // Calculate new Gaussian at critical point
+        uint256 g = Math.evaluate(criticalPoint, newMu, newSigma, newLambda);
+        
+        // Return the maximum possible loss
         amount = g < f ? f - g : 0;
     }
 
@@ -255,10 +231,10 @@ contract DistributionAMM {
         b += amount;
         k = kToBRatio * b;
 
-        positionNFT.mint(msg.sender, amount, mu, sigma, lambda, newMu, newSigma, newLambda);
+        positionId = positionNFT.mint(msg.sender, amount, mu, sigma, lambda, newMu, newSigma, newLambda);
     }
 
-       /**
+    /**
      * @notice Calculate fee for a proposed trade
      * @param oldMu Current market mean
      * @param oldSigma Current market std dev
@@ -279,27 +255,19 @@ contract DistributionAMM {
         int256 newMu,
         uint256 newSigma,
         uint256 newLambda
-    ) public view returns (uint256 feeAmount) {
-        uint256 term1 = (oldLambda * oldLambda * PRECISION) / (2 * oldSigma * SQRT_PI);
-        uint256 term2 = (newLambda * newLambda * PRECISION) / (2 * newSigma * SQRT_PI);
-
-        // Cross term: -2 * lambda_f * lambda_g * exp(-deltaMu^2 / (2 * (sigma_f^2 + sigma_g^2))) / sqrt(sigma_f^2 + sigma_g^2)
-        int256 deltaMu = newMu - oldMu;
-        uint256 deltaMuSquared = uint256(deltaMu * deltaMu);
-        uint256 varianceSum = (oldSigma * oldSigma) + (newSigma * newSigma);
-        uint256 expArg = (deltaMuSquared * PRECISION) / (2 * varianceSum);
-        uint256 expResult = exp2(expArg); // Assuming exp returns 1e18 scaled result
-
-        uint256 sqrtVarianceSum = sqrt(varianceSum * PRECISION); // Scale up for precision
-        uint256 crossTermNumerator = (2 * oldLambda * newLambda * expResult * PRECISION) / SQRT_PI;
-        uint256 crossTerm = crossTermNumerator / (sqrtVarianceSum / PRECISION);
-
-        // l2 norm squared = term1 + term2 - crossTerm
-        uint256 l2Squared = term1 + term2 > crossTerm ? (term1 + term2 - crossTerm) : 0;
-
-        // l2 norm = sqrt(l2Squared)
-        uint256 l2Norm = sqrt(l2Squared * PRECISION); // Scale up for precision
-
+    ) public pure returns (uint256 feeAmount) {
+        // Use the l2Norm function from Math library
+        uint256 l2Norm = Math.l2Norm(
+            oldMu, 
+            oldSigma, 
+            oldLambda, 
+            newMu, 
+            newSigma, 
+            newLambda,
+            PRECISION,
+            SQRT_PI
+        );
+        
         // Fee = l2Norm * FEE_RATE
         feeAmount = (l2Norm * FEE_RATE) / (PRECISION * PRECISION);
     }
@@ -330,16 +298,19 @@ contract DistributionAMM {
     function withdraw(uint256 positionId, uint256 amount) external {
         require(isResolved, "market not resolved");
 
-        // require(position.owner == msg.sender, "only owner can withdraw");
+        int256 _amount = int256(amount);
         int256 payout = positionNFT.calculatePayout(positionId, outcome);
         int256 capped_payout = payout > int256(b) ? int256(b) : payout;
+        assert(capped_payout > _amount);
 
-        positionNFT.withdraw(positionId, capped_payout);
+        positionNFT.withdraw(positionId, _amount);
         b -= uint256(capped_payout);
     }
 }
 
 contract PositionNFT {
+    using Math for *;
+    
     struct Position {
         address owner;
         uint256 collateral;
@@ -359,6 +330,7 @@ contract PositionNFT {
     event Transfer(address indexed from, address indexed to, uint256 indexed tokenId);
     event Mint(address indexed to, uint256 indexed tokenId, uint256 collateral, int256 initialMu, uint256 initialSigma, uint256 initialLambda, int256 targetMu, uint256 targetSigma, uint256 targetLambda);
 
+    // mint function unchanged
     function mint(address to, uint256 collateral, int256 initialMu, uint256 initialSigma, uint256 initialLambda, int256 targetMu, uint256 targetSigma, uint256 targetLambda) external returns (uint256 tokenId) {
         tokenId = nextTokenId++;
         positions[tokenId] = Position({
@@ -377,18 +349,7 @@ contract PositionNFT {
         emit Transfer(address(0), to, tokenId);
     }
 
-        /**
-     * @notice Mint new position NFT for LP position
-     * @param to Address to mint to
-     * @param collateral Amount of collateral backing the position
-     * @param mu Mean of the gaussian to subtract from flat line
-     * @param sigma Standard deviation of the gaussian
-     * @param lambda Scale factor of the gaussian
-     * @return tokenId ID of new NFT
-     *
-     * Only callable by AMM contract. Creates a position representing:
-     * constant_line - lambda * gaussian(mu, sigma)
-     */
+    // mintLPPosition function unchanged
     function mintLPPosition(
         address to,
         uint256 collateral,
@@ -403,7 +364,7 @@ contract PositionNFT {
             initialMu: mu,
             initialSigma: sigma,
             initialLambda: lambda,
-            targetMu: 0,         // No target transition for LP position
+            targetMu: 0,
             targetSigma: 0,
             targetLambda: 0
         });
@@ -413,41 +374,40 @@ contract PositionNFT {
         emit Transfer(address(0), to, tokenId);
     }
 
+
+    
+    
     
     /**
      * @notice Calculate position payout for given outcome
-     * @return amount Payout amount
-     * 
-     * Uses stored parameters to compute:
      */
     function calculatePayout(
         uint256 tokenId, 
         int256 outcome
     ) external view returns (int256 amount) {
         Position storage position = positions[tokenId];
-        uint256 initialGaussian = calculateGaussian(outcome, position.initialMu, position.initialSigma, position.initialLambda);
-        uint256 targetGaussian = calculateGaussian(outcome, position.targetMu, position.targetSigma, position.targetLambda);
-        amount = int256(initialGaussian) - int256(targetGaussian);
-    }
-
-    /**
-     * @notice Calculate the value of a gaussian at a given point
-     * @param x The point to evaluate the gaussian at
-     * @param mu The mean of the gaussian
-     * @param sigma The standard deviation of the gaussian
-     * @param lambda The scale factor of the gaussian
-     * @return gaussian The value of the gaussian at the given point
-     */
-    function calculateGaussian(int256 x, int256 mu, uint256 sigma, uint256 lambda) private view returns (uint256 gaussian) {
-        if (sigma == 0) {
-            return 0;
-        }
-    
-        uint256 deltaSquared = uint256(x - mu) * uint256(x - mu);
-        uint256 denominator = 2 * sigma * sigma;
-        uint256 exponent = deltaSquared / denominator;
         
-        gaussian = lambda * exp2(exponent);
+        // Check if this is an LP position (targetLambda == 0)
+        if (position.targetLambda == 0) {
+            // For LP positions, we only need to compute the negative of initialGaussian
+            return -int256(Math.evaluate(
+                outcome,
+                position.initialMu,
+                position.initialSigma,
+                position.initialLambda
+            ));
+        }
+        
+        // For regular positions, use the diff function
+        return Math.diff(
+            outcome,
+            position.initialMu,
+            position.initialSigma,
+            position.initialLambda,
+            position.targetMu,
+            position.targetSigma,
+            position.targetLambda
+        );
     }
 
     /**

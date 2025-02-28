@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
+
 import "./Math.sol";
 import "forge-std/console.sol";
 
@@ -70,46 +71,46 @@ contract DistributionAMM {
         positionNFT = new PositionNFT(address(this));
     }
 
-      /**
+    /**
      * @notice Adds liquidity to the pool
      * @param amount Amount of collateral to add (y * b)
      * @return shares LP tokens minted
      * @return positionId NFT representing market position component
-     * 
+     *
      * **Mathematical Explanation:**
-     * 
+     *
      * - **Initial State:**
      *   - The pool is initially backed by `b` collateral.
      *   - The pool holds a market position defined by `h = b - λf`, where:
      *     - `λ` (lambda) is the scale factor.
      *     - `f` is the Gaussian function representing the market position.
-     * 
+     *
      * - **Liquidity Addition:**
      *   1. **Collateral Contribution:**
      *      - The Liquidity Provider (LP) adds `amount = y * b` collateral, where:
      *        - `y = amount / b` represents the proportion of the **existing** pool's collateral being added.
      *        - `b` is the current total collateral in the pool **before** the addition.
-     * 
+     *
      *   2. **LP Receives:**
      *      - **LP Shares:** Representing a proportion of the pool based on the added collateral.
      *      - **Position NFT:** Representing `y * (λf)`, the scaled current market position.
      *      Note: these should add up to a flat payout of yb at the time of return.
-     * 
+     *
      * - **Resulting State:**
      *   - **New Collateral (`b_new`):**
      *     - `b_new = b + y * b = b * (1 + y)`
-     * 
+     *
      *   - **LP Ownership Proportion (`p`):**
      *     - The LP's ownership proportion of the pool after addition is:
      *       ```
      *       p = (y * b) / (b * (1 + y)) = y / (1 + y)
      *       ```
      *     - **Note:** `y` is the proportion of the existing pool's collateral being added, not the final ownership proportion.
-     * 
+     *
      *   - **Components Received:**
      *     - **LP Shares:** Equivalent to `p` proportion of the new pool.
      *     - **Position NFT:** Represents `y * (λf)`, maintaining the scaled market position.
-     * 
+     *
      * - **Impact:**
      *   - **Collateral (`b`):** Increases to `b_new = b * (1 + y)`
      *   - **L2 Norm Constraint (`k`):** Increases proportionally according to `kToBRatio`.
@@ -123,7 +124,7 @@ contract DistributionAMM {
         uint256 y = amount / b;
         uint256 _b = b * (1 + y);
         uint256 _k = kToBRatio * _b;
-        
+
         if (totalShares == 0) {
             shares = amount;
         } else {
@@ -143,7 +144,7 @@ contract DistributionAMM {
      * @notice Removes liquidity from the pool
      * @param shares Amount of LP shares to burn
      * @return amount Collateral returned
-     * 
+     *
      * **Mathematical Explanation:**
      * - LP must burn both their LP shares
      * - Amount returned is proportional to shares burned relative to total supply.
@@ -167,8 +168,7 @@ contract DistributionAMM {
         positionNFT.withdraw(positionId, amount);
     }
 
-
-     /**
+    /**
      * @notice Calculate required collateral for a trade
      * @param oldMu Current market mean
      * @param oldSigma Current market std dev
@@ -195,15 +195,15 @@ contract DistributionAMM {
     ) public pure returns (uint256 amount) {
         // Calculate old Gaussian at critical point
         uint256 f = Math.evaluate(criticalPoint, oldMu, oldSigma, oldLambda);
-        
+
         // Calculate new Gaussian at critical point
         uint256 g = Math.evaluate(criticalPoint, newMu, newSigma, newLambda);
-        
+
         // Return the maximum possible loss
         amount = g < f ? f - g : 0;
     }
 
-  /**
+    /**
      * @notice Execute a trade to move the market gaussian
      * @param amount Collateral provided (includes required fees in cash)
      * @param newMu New mean to move market to
@@ -225,8 +225,11 @@ contract DistributionAMM {
      * which occurs at the critical point. Frontend should aggregate positions
      * across all NFTs in user's wallet for clear position display.
      */
-    function trade(uint256 amount, int256 newMu, uint256 newSigma, uint256 newLambda, int256 criticalPoint) external returns (uint256 positionId) {
-        uint256 l2 = newLambda * Math.sqrt(1/(2 * newSigma * SQRT_2PI));
+    function trade(uint256 amount, int256 newMu, uint256 newSigma, uint256 newLambda, int256 criticalPoint)
+        external
+        returns (uint256 positionId)
+    {
+        uint256 l2 = newLambda * Math.sqrt(1 / (2 * newSigma * SQRT_2PI));
         require(l2 == k, "L2 norm does not match k");
 
         // uint256 backing = k / (newSigma * SQRT_PI);
@@ -266,15 +269,8 @@ contract DistributionAMM {
         uint256 newSigma,
         uint256 newLambda
     ) public pure returns (uint256 feeAmount) {
-        uint256 distance = Math.wassersteinDistance(
-            oldMu, 
-            oldSigma, 
-            oldLambda, 
-            newMu, 
-            newSigma, 
-            newLambda
-        );
-        
+        uint256 distance = Math.wassersteinDistance(oldMu, oldSigma, oldLambda, newMu, newSigma, newLambda);
+
         feeAmount = (distance * FEE_RATE) / (PRECISION * PRECISION);
     }
 
@@ -315,7 +311,7 @@ contract DistributionAMM {
 
 contract PositionNFT {
     using Math for *;
-    
+
     struct Position {
         address owner;
         uint256 collateral;
@@ -333,7 +329,17 @@ contract PositionNFT {
     mapping(uint256 => address) private _owners;
 
     event Transfer(address indexed from, address indexed to, uint256 indexed tokenId);
-    event Mint(address indexed to, uint256 indexed tokenId, uint256 collateral, int256 initialMu, uint256 initialSigma, uint256 initialLambda, int256 targetMu, uint256 targetSigma, uint256 targetLambda);
+    event Mint(
+        address indexed to,
+        uint256 indexed tokenId,
+        uint256 collateral,
+        int256 initialMu,
+        uint256 initialSigma,
+        uint256 initialLambda,
+        int256 targetMu,
+        uint256 targetSigma,
+        uint256 targetLambda
+    );
 
     address public amm;
 
@@ -342,7 +348,16 @@ contract PositionNFT {
     }
 
     // mint function unchanged
-    function mint(address to, uint256 collateral, int256 initialMu, uint256 initialSigma, uint256 initialLambda, int256 targetMu, uint256 targetSigma, uint256 targetLambda) external returns (uint256 tokenId) {
+    function mint(
+        address to,
+        uint256 collateral,
+        int256 initialMu,
+        uint256 initialSigma,
+        uint256 initialLambda,
+        int256 targetMu,
+        uint256 targetSigma,
+        uint256 targetLambda
+    ) external returns (uint256 tokenId) {
         tokenId = nextTokenId++;
         positions[tokenId] = Position({
             owner: to,
@@ -360,13 +375,10 @@ contract PositionNFT {
         emit Transfer(address(0), to, tokenId);
     }
 
-    function mintLPPosition(
-        address to,
-        uint256 collateral,
-        int256 mu,
-        uint256 sigma,
-        uint256 lambda
-    ) external returns (uint256 tokenId) {
+    function mintLPPosition(address to, uint256 collateral, int256 mu, uint256 sigma, uint256 lambda)
+        external
+        returns (uint256 tokenId)
+    {
         tokenId = nextTokenId++;
         positions[tokenId] = Position({
             owner: to,
@@ -387,23 +399,15 @@ contract PositionNFT {
     /**
      * @notice Calculate position payout for given outcome
      */
-    function calculatePayout(
-        uint256 tokenId, 
-        int256 outcome
-    ) external view returns (int256 amount) {
+    function calculatePayout(uint256 tokenId, int256 outcome) external view returns (int256 amount) {
         Position storage position = positions[tokenId];
-        
+
         // Check if this is an LP position (targetLambda == 0)
         if (position.targetLambda == 0) {
             // For LP positions, we only need to compute the negative of initialGaussian
-            return int256(Math.evaluate(
-                outcome,
-                position.initialMu,
-                position.initialSigma,
-                position.initialLambda
-            ));
+            return int256(Math.evaluate(outcome, position.initialMu, position.initialSigma, position.initialLambda));
         }
-        
+
         // Computes the difference between the initial and target gaussians
         return Math.difference(
             outcome,

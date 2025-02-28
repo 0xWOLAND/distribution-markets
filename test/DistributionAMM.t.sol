@@ -15,17 +15,18 @@ contract DistributionAMMTest is Test {
     address public user1 = address(0x2);
 
     DistributionAMM public amm;
+
     function setUp() public {
         vm.startPrank(owner);
         amm = new DistributionAMM();
         amm.initialize(
-            446701179693725312,    // _k
-            1000000000000000000,   // _b (10 scaled)
-            44670117969372531,     // _kToBRatio
-            1e18,                  // _sigma
-            1e18,                  // _lambda
-            0,                     // _mu
-            1e16                   // _minSigma
+            446701179693725312, // _k
+            1000000000000000000, // _b (10 scaled)
+            44670117969372531, // _kToBRatio
+            1e18, // _sigma
+            1e18, // _lambda
+            0, // _mu
+            1e16 // _minSigma
         );
         vm.stopPrank();
     }
@@ -44,7 +45,6 @@ contract DistributionAMMTest is Test {
         console.log("position.targetLambda: ", position.targetLambda);
     }
 
-
     function test_AddLiquidity() public {
         vm.startPrank(user1);
         uint256 amount = 2e18;
@@ -54,7 +54,7 @@ contract DistributionAMMTest is Test {
         console.log("lpShares[user1]: ", amm.lpShares(user1));
         PositionNFT positionNFT = PositionNFT(address(amm.positionNFT()));
         printPosition(positionId);
-        
+
         console.log("--------------------------------");
 
         uint256 removedAmount = amm.removeLiquidity(shares, positionId);

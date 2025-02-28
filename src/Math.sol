@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
-import { UD60x18, ud } from "@prb-math-4.1.0/src/UD60x18.sol";
-import { SD59x18, sd } from "@prb-math-4.1.0/src/SD59x18.sol";
+
+import {UD60x18, ud} from "@prb-math-4.1.0/src/UD60x18.sol";
+import {SD59x18, sd} from "@prb-math-4.1.0/src/SD59x18.sol";
 
 library Math {
     /**
@@ -18,11 +19,11 @@ library Math {
         SD59x18 muFixed = sd(mu);
         UD60x18 sigmaFixed = ud(sigma);
         UD60x18 lambdaFixed = ud(lambda);
-        
+
         UD60x18 result = _evaluate(xFixed, muFixed, sigmaFixed, lambdaFixed);
         return result.unwrap();
     }
-    
+
     function _evaluate(SD59x18 x, SD59x18 mu, UD60x18 sigma, UD60x18 lambda) internal pure returns (UD60x18) {
         SD59x18 xDiff = x.sub(mu);
         UD60x18 deltaSquared = xDiff.mul(xDiff).intoUD60x18();
@@ -39,10 +40,15 @@ library Math {
         UD60x18 normalization = lambda.mul(ud(398942280401432677)).div(sigma); // (λ * (1 / sqrt(2π))) / σ
         return normalization.mul(gaussian);
     }
-    
+
     function difference(
-        int256 x, int256 mu1, uint256 sigma1, uint256 lambda1,
-        int256 mu2, uint256 sigma2, uint256 lambda2
+        int256 x,
+        int256 mu1,
+        uint256 sigma1,
+        uint256 lambda1,
+        int256 mu2,
+        uint256 sigma2,
+        uint256 lambda2
     ) internal pure returns (int256) {
         SD59x18 xFixed = sd(x);
         SD59x18 mu1Fixed = sd(mu1);
@@ -51,10 +57,10 @@ library Math {
         SD59x18 mu2Fixed = sd(mu2);
         UD60x18 sigma2Fixed = ud(sigma2);
         UD60x18 lambda2Fixed = ud(lambda2);
-        
+
         UD60x18 f = _evaluate(xFixed, mu1Fixed, sigma1Fixed, lambda1Fixed);
         UD60x18 g = _evaluate(xFixed, mu2Fixed, sigma2Fixed, lambda2Fixed);
-        
+
         if (f.gte(g)) {
             return int256(f.sub(g).unwrap());
         } else {
@@ -62,10 +68,11 @@ library Math {
         }
     }
 
-    function klDivergence(
-        int256 mu1, uint256 sigma1, uint256 lambda1,
-        int256 mu2, uint256 sigma2, uint256 lambda2
-    ) internal pure returns (uint256) {
+    function klDivergence(int256 mu1, uint256 sigma1, uint256 lambda1, int256 mu2, uint256 sigma2, uint256 lambda2)
+        internal
+        pure
+        returns (uint256)
+    {
         if (sigma1 == 0 || sigma2 == 0 || lambda1 == 0 || lambda2 == 0) return 0;
 
         SD59x18 mu1Fixed = sd(mu1);
@@ -77,10 +84,11 @@ library Math {
         return kl.unwrap();
     }
 
-    function _klDivergence(
-        SD59x18 mu1, UD60x18 sigma1,
-        SD59x18 mu2, UD60x18 sigma2
-    ) internal pure returns (UD60x18 dkl) {
+    function _klDivergence(SD59x18 mu1, UD60x18 sigma1, SD59x18 mu2, UD60x18 sigma2)
+        internal
+        pure
+        returns (UD60x18 dkl)
+    {
         UD60x18 term1 = sigma2.div(sigma1).ln();
         UD60x18 sigma1Squared = sigma1.mul(sigma1);
         UD60x18 sigma2Squared = sigma2.mul(sigma2);
@@ -94,11 +102,15 @@ library Math {
     }
 
     function wassersteinDistance(
-        int256 mu1, uint256 sigma1, uint256 lambda1,
-        int256 mu2, uint256 sigma2, uint256 lambda2
+        int256 mu1,
+        uint256 sigma1,
+        uint256 lambda1,
+        int256 mu2,
+        uint256 sigma2,
+        uint256 lambda2
     ) internal pure returns (uint256) {
         if (sigma1 == 0 || sigma2 == 0 || lambda1 == 0 || lambda2 == 0) return 0;
-        
+
         SD59x18 mu1Fixed = sd(mu1);
         UD60x18 sigma1Fixed = ud(sigma1);
         UD60x18 lambda1Fixed = ud(lambda1);
@@ -106,13 +118,18 @@ library Math {
         UD60x18 sigma2Fixed = ud(sigma2);
         UD60x18 lambda2Fixed = ud(lambda2);
 
-        UD60x18 distance = _wassersteinDistance(mu1Fixed, sigma1Fixed, lambda1Fixed, mu2Fixed, sigma2Fixed, lambda2Fixed);
+        UD60x18 distance =
+            _wassersteinDistance(mu1Fixed, sigma1Fixed, lambda1Fixed, mu2Fixed, sigma2Fixed, lambda2Fixed);
         return distance.unwrap();
     }
 
     function _wassersteinDistance(
-        SD59x18 mu1, UD60x18 sigma1, UD60x18 lambda1,
-        SD59x18 mu2, UD60x18 sigma2, UD60x18 lambda2
+        SD59x18 mu1,
+        UD60x18 sigma1,
+        UD60x18 lambda1,
+        SD59x18 mu2,
+        UD60x18 sigma2,
+        UD60x18 lambda2
     ) internal pure returns (UD60x18) {
         UD60x18 kld1 = _klDivergence(mu1, sigma1, mu2, sigma2);
         UD60x18 kld2 = _klDivergence(mu2, sigma2, mu1, sigma1);

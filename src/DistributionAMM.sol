@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
-import "dependencies/@prb-math-4.1.0/src/Common.sol";
+import "@prb-math-4.1.0/src/Common.sol";
 import "./Math.sol";
 
 contract DistributionAMM {
@@ -399,7 +399,7 @@ contract PositionNFT {
         }
         
         // For regular positions, use the diff function
-        return Math.diff(
+        return Math.difference(
             outcome,
             position.initialMu,
             position.initialSigma,
@@ -417,6 +417,7 @@ contract PositionNFT {
      */
     function withdraw(uint256 tokenId, int256 amount) external {
         uint256 collateral = amount > 0 ? uint256(amount) : uint256(-amount);
+        require(positions[tokenId].collateral >= collateral, "insufficient collateral");
         positions[tokenId].collateral -= collateral;
     }
 }

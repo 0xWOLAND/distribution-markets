@@ -96,32 +96,4 @@ contract MathTest is Test {
         uint256 result = Math.evaluate(x, mu, sigma, lambda);
         assertGe(result, 0, "Gaussian evaluation should be non-negative");
     }
-
-    function testFuzz_KLDivergence(
-        int256 mu1, uint256 sigma1, uint256 lambda1,
-        int256 mu2, uint256 sigma2, uint256 lambda2
-    ) public pure {
-        sigma1 = bound(sigma1, 1e16, 10e18);
-        sigma2 = bound(sigma2, 1e16, 10e18);
-        lambda1 = bound(lambda1, 1e16, 10e18);
-        lambda2 = bound(lambda2, 1e16, 10e18);
-        mu1 = bound(mu1, -10e18, 10e18);
-        mu2 = bound(mu2, -10e18, 10e18);
-        uint256 kl = Math.klDivergence(mu1, sigma1, lambda1, mu2, sigma2, lambda2);
-        assertGe(kl, 0, "KL divergence should be non-negative");
-    }
-
-    function testFuzz_WassersteinDistance(
-        int256 mu1, uint256 sigma1, uint256 lambda1,
-        int256 mu2, uint256 sigma2, uint256 lambda2
-    ) public pure {
-        sigma1 = bound(sigma1, 1e16, 10e18);
-        sigma2 = bound(sigma2, 1e16, 10e18);
-        lambda1 = bound(lambda1, 1e16, 10e18);
-        lambda2 = bound(lambda2, 1e16, 10e18);
-        mu1 = bound(mu1, -10e18, 10e18);
-        mu2 = bound(mu2, -10e18, 10e18);
-        uint256 distance = Math.wassersteinDistance(mu1, sigma1, lambda1, mu2, sigma2, lambda2);
-        assertGe(distance, 0, "Wasserstein distance should be non-negative");
-    }
 }

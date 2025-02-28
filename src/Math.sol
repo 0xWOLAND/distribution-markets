@@ -123,4 +123,10 @@ library Math {
         UD60x18 sumSquared = lambdaDiffSquared.add(kldDiffSquared);
         return sumSquared.sqrt();
     }
+
+    function sqrt(uint256 x) internal pure returns (uint256) {
+        UD60x18 xFixed = ud(x);
+        UD60x18 result = xFixed.sqrt();
+        return result.unwrap();
+    }
 }

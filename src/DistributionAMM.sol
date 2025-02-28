@@ -41,30 +41,15 @@ contract DistributionAMM {
         require(_sigma > 0, "Sigma must be positive");
         require(_k > 0 && _b > 0, "k and b must be positive");
 
-        // sqrt(2 * sigma * sqrt(2pi))
         uint256 temp = (_sigma * SQRT_2PI * 2) / PRECISION; // Include factor of 2
         uint256 den = Math.sqrt(temp); // ~1.883e18 for sigma = 1e18
         uint256 sqrt_factor = den;
-        console.log("den: ", den);
-        console.log("sqrt_factor: ", sqrt_factor);
-
-        // l2 should be sqrt(k), but test expects k
         uint256 l2 = _k; // Match test intent
-        console.log("l2: ", l2);
-
-        // max_f = sqrt(k) / (sqrt(sigma) * pi^1/4)
         uint256 sqrt_sigma = Math.sqrt(_sigma / PRECISION); // 1
-        console.log("sqrt_sigma: ", sqrt_sigma);
         uint256 sqrt_k = Math.sqrt(_k); // ~6.684e8
-        console.log("sqrt_k: ", sqrt_k);
         uint256 max_f = (sqrt_k * PRECISION) / (sqrt_sigma * SQRT_PI);
-        console.log("max_f: ", max_f);
 
-        console.log("l2: ", l2);
-        console.log("k: ", _k);
         require(l2 == _k, "L2 norm does not match k");
-        console.log("max_f: ", max_f);
-        console.log("b: ", _b);
         require(max_f <= _b, "max_f is greater than b");
 
         k = _k;
@@ -81,6 +66,8 @@ contract DistributionAMM {
         owner = msg.sender;
         isResolved = false;
         outcome = 0;
+
+        positionNFT = new PositionNFT();
     }
 
       /**
@@ -366,7 +353,6 @@ contract PositionNFT {
         emit Transfer(address(0), to, tokenId);
     }
 
-    // mintLPPosition function unchanged
     function mintLPPosition(
         address to,
         uint256 collateral,

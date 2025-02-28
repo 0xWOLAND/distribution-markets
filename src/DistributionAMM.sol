@@ -257,15 +257,13 @@ contract DistributionAMM {
         uint256 newLambda
     ) public pure returns (uint256 feeAmount) {
         // Use the l2Norm function from Math library
-        uint256 l2Norm = Math.l2Norm(
+        uint256 l2Norm = Math.wassersteinDistance(
             oldMu, 
             oldSigma, 
             oldLambda, 
             newMu, 
             newSigma, 
-            newLambda,
-            PRECISION,
-            SQRT_PI
+            newLambda
         );
         
         // Fee = l2Norm * FEE_RATE

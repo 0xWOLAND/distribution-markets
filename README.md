@@ -1,66 +1,86 @@
-## Foundry
+# Distribution Markets
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+A prediction market protocol for trading on continuous outcome distributions.
 
-Foundry consists of:
+## Overview
 
--   **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
--   **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
--   **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
--   **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+This protocol enables traders to express beliefs about continuous outcomes (like timing of events or price levels) through full probability distributions rather than just binary or discrete options. The implementation uses Gaussian distributions and a constant function market maker with L2 norm preservation.
 
-## Documentation
+## Features
 
-https://book.getfoundry.sh/
+- Trade on full probability distributions instead of discrete outcomes
+- Specializes in Normal/Gaussian distributions with adjustable parameters
+- Constant Function AMM with mathematical guarantees
+- Permissionless liquidity provision
+- Fully collateralized positions via NFTs
 
-## Usage
+## Development
 
-### Build
-
-```shell
-$ forge build
-```
-
-### Test
+This project uses [Foundry](https://github.com/foundry-rs/foundry).
 
 ```shell
-$ forge test
+# Build the project
+forge build
+
+# Run tests
+forge test
+
+# Format code
+forge fmt
+
+# Generate gas snapshots
+forge snapshot
+
+# Local development node
+anvil
+
+# Deploy (replace with your values)
+forge script script/Deploy.s.sol:DeployScript --rpc-url <your_rpc_url> --private-key <your_private_key>
 ```
 
-### Format
+## Basic Usage
 
-```shell
-$ forge fmt
+```solidity
+// Initialize a market
+DistributionAMM market = new DistributionAMM();
+market.initialize(
+    4.47e17,  // k - L2 norm 
+    1e18,     // b - backing amount
+    4.47e17,  // kToBRatio
+    1e18,     // sigma - initial std dev
+    1e18,     // lambda - scale factor
+    0,        // mu - initial mean
+    1e17      // minSigma - minimum std dev
+);
+
+// Add liquidity
+(shares, positionId) = market.addLiquidity(1e18);
+
+// Trade to move the market
+market.trade(
+    1e18,    // collateral
+    5e17,    // new mean
+    1.2e18,  // new std dev 
+    1e18,    // new scale factor
+    -1e18    // critical point
+);
+
+// Resolve market and withdraw
+market.resolve(6e17);  // outcome value
+market.withdraw(positionId, 1e18);
 ```
 
-### Gas Snapshots
+## Architecture
 
-```shell
-$ forge snapshot
-```
+- **DistributionAMM**: Handles trades, liquidity provision, and market resolution
+- **PositionNFT**: Manages trader positions as NFTs with payout calculations
+- **Math**: Utility library for Gaussian calculations and other mathematical operations
 
-### Anvil
+## References
 
-```shell
-$ anvil
-```
+This implementation is based on the concepts described in:
+- White, D. (2024). [Distribution Markets](https://www.paradigm.xyz/blog/distribution-markets). Paradigm Research.
 
-### Deploy
+## License
 
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+MIT

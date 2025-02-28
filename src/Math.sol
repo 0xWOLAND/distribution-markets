@@ -4,6 +4,13 @@ import { UD60x18, ud } from "@prb-math-4.1.0/src/UD60x18.sol";
 import { SD59x18, sd } from "@prb-math-4.1.0/src/SD59x18.sol";
 
 library Math {
+    /**
+     * @notice Evaluate the Gaussian distribution at a given point
+     * @param x The point to evaluate the Gaussian at
+     * @param mu The mean of the Gaussian
+     * @param sigma The standard deviation of the Gaussian
+     * @param lambda The lambda of the Gaussian
+     */
     function evaluate(int256 x, int256 mu, uint256 sigma, uint256 lambda) internal pure returns (uint256) {
         if (sigma == 0 || lambda == 0) return 0;
 
@@ -20,9 +27,16 @@ library Math {
         SD59x18 xDiff = x.sub(mu);
         UD60x18 deltaSquared = xDiff.mul(xDiff).intoUD60x18();
         UD60x18 sigmaSquared = sigma.mul(sigma);
-        UD60x18 exponent = deltaSquared.div(sigmaSquared.mul(ud(2e18))); 
+        UD60x18 denominator = sigmaSquared.mul(ud(2e18));
+
+        // If exponent would be too large, return 0 (Gaussian tail is negligible)
+        if (deltaSquared.div(denominator) > ud(133e18)) {
+            return ud(0);
+        }
+
+        UD60x18 exponent = deltaSquared.div(denominator); // (x - mu)^2 / (2 * sigma^2)
         UD60x18 gaussian = ud(1e18).div(exponent.exp()); // e^(-exponent)
-        UD60x18 normalization = lambda.mul(ud(398942280401432677)).div(sigma); 
+        UD60x18 normalization = lambda.mul(ud(398942280401432677)).div(sigma); // (λ * (1 / sqrt(2π))) / σ
         return normalization.mul(gaussian);
     }
     
